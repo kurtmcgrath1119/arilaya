@@ -1,0 +1,17 @@
+services:
+  arilaya:
+    build: .
+    image: arilaya
+    ports:
+      - "3000:3000"
+    environment:
+      SESSION_SECRET: ${SESSION_SECRET:-change-this-secret}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-this-password}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    volumes:
+      - arilaya-data:/data
+    restart: unless-stopped
+
+volumes:
+  arilaya-data:

@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+.au{--dark:#1b3a2f;--lime:#8dc63f;--cream:#f6efe0;--ink:#12261e;--line:#e2d6bb;
+  min-height:100vh;display:grid;grid-template-columns:1fr 1fr;background:var(--cream);
+  font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--dark);overflow-x:hidden;position:relative}
+
+/* left: form */
+.au-form{position:relative;display:flex;justify-content:center;align-items:center;padding:80px 24px 40px;overflow:hidden}
+.au-form::before{content:'';position:absolute;width:420px;height:420px;border-radius:50%;background:#efe3c8;top:-170px;left:-150px}
+.au-form::after{content:'';position:absolute;width:110px;height:110px;border-radius:50%;background:#efe3c8;bottom:60px;right:40px}
+.au-back{position:absolute;top:24px;left:28px;z-index:3;color:var(--dark);font-weight:600;font-size:14px;text-decoration:none}
+.au-box{position:relative;z-index:1;width:min(340px,100%)}
+.au-title{text-align:center;font-size:24px;font-weight:700;margin:0 0 20px}
+.au-lbl{font-size:12px;color:#6b7a72;margin:0 0 6px}
+.au-roles{display:flex;gap:8px;margin:0 0 18px}
+.au-roles button{flex:1;padding:9px;border:2px solid var(--line);border-radius:10px;background:transparent;
+  color:var(--dark);font:inherit;font-weight:600;cursor:pointer}
+.au-roles button.on{background:var(--dark);border-color:var(--dark);color:#fff}
+
+.au-field{position:relative;margin-bottom:14px}
+.au-field input{width:100%;padding:15px 14px 11px;border:2px solid var(--line);border-radius:10px;
+  background:rgba(255,255,255,.4);color:var(--dark);font:inherit;outline:none}
+.au-field input:focus{border-color:var(--dark);background:#fff}
+.au-field label{position:absolute;left:12px;top:50%;transform:translateY(-50%);padding:0 5px;
+  color:#7a8a82;pointer-events:none;transition:all .15s}
+.au-field input:focus + label,.au-field input:not(:placeholder-shown) + label{
+  top:0;font-size:12px;font-weight:600;color:var(--dark);background:var(--cream)}
+
+.au-terms{display:flex;gap:8px;align-items:center;font-size:12px;margin:2px 0 16px}
+.au-terms input{accent-color:var(--dark);width:16px;height:16px}
+.au-btn{width:100%;padding:13px;border:0;border-radius:10px;background:var(--lime);color:var(--ink);
+  font:inherit;font-weight:700;font-size:16px;cursor:pointer}
+.au-btn:hover{filter:brightness(1.06)}
+.au-btn:disabled{opacity:.6;cursor:default}
+.au-err{color:#a32d2d;font-size:13px;margin:0 0 12px}
+.au-or{display:flex;align-items:center;gap:10px;color:#7a8a82;font-size:12px;margin:18px 0}
+.au-or::before,.au-or::after{content:'';flex:1;height:1px;background:var(--line)}
+.au-g{display:flex;justify-content:center;min-height:44px}
+
+/* right: big green circle */
+.au-side{position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.au-side::before{content:'';position:absolute;width:150%;aspect-ratio:1;border-radius:50%;left:0;top:50%;
+  transform:translateY(-50%);background:linear-gradient(135deg,#2f6b52,#1b3a2f 60%,#12261e)}
+.au-side-in{position:relative;text-align:center;color:#fff;padding:24px;max-width:340px}
+.au-side h2{font-size:clamp(30px,4vw,44px);color:var(--lime);margin:0 0 14px;font-weight:700}
+.au-side p{margin:0 0 22px;font-size:14px;color:#d5e2db}
+.au-ghost{padding:11px 30px;border-radius:999px;border:2px solid var(--lime);background:transparent;
+  color:var(--lime);font:inherit;font-weight:600;cursor:pointer}
+.au-ghost:hover{background:var(--lime);color:var(--ink)}
+
+@media(max-width:860px){
+  .au{grid-template-columns:1fr}
+  .au-form{padding:64px 20px 32px}
+  .au-side{order:2;padding:36px 0}
+  .au-side::before{width:100%;aspect-ratio:auto;height:100%;top:0;transform:none;border-radius:32px 32px 0 0}
+}
+
+.au-box.wide{width:min(470px,100%)}
+.au-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.au-sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#7a8a82;margin:18px 0 10px}
+.au-hint{font-size:11px;color:#7a8a82;margin:-8px 0 12px 4px}
+@media(max-width:520px){.au-row{grid-template-columns:1fr;gap:0}}
+
+@keyframes au-fade{from{opacity:0}to{opacity:1}}
+@keyframes au-fade-up{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes au-circle{from{opacity:0;transform:translate(35%,-50%)}to{opacity:1;transform:translate(0,-50%)}}
+@keyframes au-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-14px)}}
+@keyframes au-shadow{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(.65);opacity:.22}}
+@keyframes au-drift{0%,100%{transform:translate(0,0)}50%{transform:translate(18px,14px)}}
+
+.au{animation:au-fade .5s ease both}
+.au-form::before{animation:au-drift 12s ease-in-out infinite}
+.au-form::after{animation:au-drift 9s ease-in-out infinite reverse}
+.au-side::before{animation:au-circle 1s cubic-bezier(.2,.8,.2,1) both}
+
+
+.au-swap>*,.au-side-swap{animation:au-fade-up .55s cubic-bezier(.2,.7,.2,1) both}
+.au-swap>*:nth-child(1){animation-delay:.05s}
+.au-swap>*:nth-child(2){animation-delay:.1s}
+.au-swap>*:nth-child(3){animation-delay:.15s}
+.au-swap>*:nth-child(4){animation-delay:.2s}
+.au-swap form>*{animation:au-fade-up .5s cubic-bezier(.2,.7,.2,1) both}
+.au-swap form>*:nth-child(1){animation-delay:.24s}
+.au-swap form>*:nth-child(2){animation-delay:.28s}
+.au-swap form>*:nth-child(3){animation-delay:.32s}
+.au-swap form>*:nth-child(4){animation-delay:.36s}
+.au-swap form>*:nth-child(5){animation-delay:.4s}
+.au-swap form>*:nth-child(6){animation-delay:.44s}
+.au-swap form>*:nth-child(7){animation-delay:.48s}
+.au-swap form>*:nth-child(8){animation-delay:.52s}
+.au-swap form>*:nth-child(9){animation-delay:.56s}
+.au-swap form>*:nth-child(10){animation-delay:.6s}
+.au-side-swap{animation-delay:.3s}
+
+.au-pin-wrap{display:flex;flex-direction:column;align-items:center;margin-bottom:22px}
+.au-pin{width:88px;height:auto;animation:au-float 3.2s ease-in-out infinite;filter:drop-shadow(0 10px 14px rgba(0,0,0,.25))}
+.au-pin-shadow{width:46px;height:9px;border-radius:50%;background:rgba(0,0,0,.3);margin-top:8px;animation:au-shadow 3.2s ease-in-out infinite}
+
+
+.au-btn,.au-ghost,.au-roles button{transition:transform .15s ease,filter .15s ease,background .2s ease,color .2s ease,border-color .2s ease}
+.au-btn:hover:not(:disabled){transform:translateY(-2px)}
+.au-btn:active:not(:disabled){transform:translateY(0)}
+.au-ghost:hover{transform:translateY(-2px)}
+
+@media(max-width:860px){.au-side::before{animation:none}}
+
+/* respect people who turn animations off in their system settings */
+@media(prefers-reduced-motion:reduce){
+  .au,.au *,.au *::before,.au *::after{animation:none!important;transition:none!important}
+}
