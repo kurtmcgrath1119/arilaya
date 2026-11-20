@@ -8,7 +8,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-change-this-secret}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-this-password}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-370041677958-7utg9bm6s09ot545rneb3gc7rp67accp.apps.googleusercontent.com}
     volumes:
       - arilaya-data:/data
     restart: unless-stopped
