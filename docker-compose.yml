@@ -5,13 +5,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      SESSION_SECRET: ${SESSION_SECRET:-change-this-secret}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-this-password}
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL in .env}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:?Set SUPABASE_ANON_KEY in .env}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:?Set SUPABASE_SECRET_KEY in .env}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-370041677958-7utg9bm6s09ot545rneb3gc7rp67accp.apps.googleusercontent.com}
-    volumes:
-      - arilaya-data:/data
     restart: unless-stopped
-
-volumes:
-  arilaya-data:

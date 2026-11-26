@@ -1,10 +1,15 @@
+import { getAccessToken } from './supabase'
+
 export async function api(url, opts) {
   const isForm = opts?.body instanceof FormData
+  const token = await getAccessToken()
+  const headers = isForm ? {} : { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
   const init = opts ? {
     method: opts.method,
-    headers: isForm ? undefined : { 'Content-Type': 'application/json' },
+    headers,
     body: isForm ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined
-  } : undefined
+  } : { headers }
   const r = await fetch(url, init)
   const d = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(d.error || 'Request failed')

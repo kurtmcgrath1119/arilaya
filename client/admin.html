@@ -8,7 +8,7 @@
   <title>AriLaya Admin</title>
   <link rel="icon" type="image/jpeg" href="/logo.jpg">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <a class="skip-link" href="#admin-main">Skip to administration</a>
@@ -29,7 +29,7 @@
       <span class="admin-eyebrow">Restricted access</span>
       <h2>Admin login</h2>
       <p class="mu">Sign in to review listings and manage the public map.</p>
-      <label for="l-user">Username</label><input id="l-user" autocomplete="username" required>
+      <label for="l-user">E-mail</label><input id="l-user" type="email" autocomplete="username" required>
       <label for="l-pass">Password</label><input id="l-pass" type="password" autocomplete="current-password" required>
       <div class="row"><button class="pri" type="submit">Log in</button></div><div id="l-msg" aria-live="polite"></div>
     </form>
@@ -87,6 +87,6 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="common.js"></script>
-  <script src="admin.js"></script>
+  <script type="module" src="/src/admin.js"></script>
 </body>
 </html>

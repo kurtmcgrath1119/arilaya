@@ -3,6 +3,8 @@ import { Link, Route, Routes, useLocation } from 'react-router-dom'
 import Header from './Header.jsx'
 import Landing from './pages/Landing.jsx'
 import Login from './pages/Login.jsx'
+import AuthCallback from './pages/AuthCallback.jsx'
+import ResetPassword from './pages/ResetPassword.jsx'
 import MapPage from './pages/MapPage.jsx'
 import Seller from './pages/Seller.jsx'
 import Buyer from './pages/Buyer.jsx'
@@ -10,6 +12,8 @@ import Buyer from './pages/Buyer.jsx'
 const PAGE_TITLES = {
   '/': 'AriLaya | Find and list land in Mamburao',
   '/login': 'Sign in | AriLaya',
+  '/auth/callback': 'Finishing sign-in | AriLaya',
+  '/reset-password': 'Reset password | AriLaya',
   '/map': 'Explore lots | AriLaya',
   '/seller': 'Seller dashboard | AriLaya',
   '/buyer': 'Buyer dashboard | AriLaya'
@@ -59,6 +63,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/map" element={<MapPage />} />
         <Route path="/seller" element={<Seller />} />
         <Route path="/buyer" element={<Buyer />} />

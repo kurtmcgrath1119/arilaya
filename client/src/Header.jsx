@@ -115,7 +115,9 @@ export default function Header({ subtitle }) {
               {user.picture && <img className="avatar" src={user.picture} alt="" referrerPolicy="no-referrer" />}
               {user.name}<span className="role-tag">{user.role}</span>
             </span>
-            <Link className="hd-dashboard" to={user.role === 'seller' ? '/seller' : '/buyer'}>Dashboard</Link>
+            {user.role === 'admin'
+              ? <a className="hd-dashboard" href="/admin.html">Admin</a>
+              : <Link className="hd-dashboard" to={user.role === 'seller' ? '/seller' : '/buyer'}>Dashboard</Link>}
             <button className="hd-btn hd-signout" onClick={signOut}>Sign out</button>
           </>
         ) : (

@@ -1,3 +1,6 @@
+import { api } from './api'
+import { getSupabase } from './supabase'
+
 let map, poly, pts = [], vtx = [], lots = [], editing = null, others, started = false;
 let reviewFilter = 'pending', reviewQuery = '';
 const FIELDS = ['title', 'barangay', 'land_type', 'price', 'status', 'address', 'nearest_road', 'landmark',
@@ -25,9 +28,18 @@ async function runAction(button, task) {
 
 async function boot() {
   try {
+    const supabase = await getSupabase();
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) {
+      $('login').classList.remove('hidden');
+      return;
+    }
     const me = await api('/api/admin/me');
     if (me.admin) start();
-    else $('login').classList.remove('hidden');
+    else {
+      await supabase.auth.signOut();
+      $('login').classList.remove('hidden');
+    }
   } catch (err) {
     $('login').classList.remove('hidden');
     $('l-msg').innerHTML = `<div class="err">${esc(err.message)}</div>`;
@@ -42,7 +54,14 @@ $('login').addEventListener('submit', async event => {
   button.textContent = 'Signing in…';
   $('l-msg').innerHTML = '';
   try {
-    await api('/api/admin/login', { method: 'POST', body: { username: $('l-user').value, password: $('l-pass').value } });
+    const supabase = await getSupabase();
+    const { error } = await supabase.auth.signInWithPassword({ email: $('l-user').value.trim(), password: $('l-pass').value });
+    if (error) throw new Error(error.message);
+    const me = await api('/api/admin/me');
+    if (!me.admin) {
+      await supabase.auth.signOut();
+      throw new Error('This account does not have admin access.');
+    }
     start();
   } catch (err) {
     $('l-msg').innerHTML = `<div class="err">${esc(err.message)}</div>`;
@@ -53,8 +72,10 @@ $('login').addEventListener('submit', async event => {
 });
 $('logout').onclick = async () => {
   $('logout').disabled = true;
-  try { await api('/api/admin/logout', { method: 'POST' }); }
-  finally { location.reload(); }
+  try {
+    const supabase = await getSupabase();
+    await supabase.auth.signOut();
+  } finally { location.reload(); }
 };
 
 async function start() {

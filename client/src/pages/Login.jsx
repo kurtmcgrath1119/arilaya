@@ -1,8 +1,8 @@
 import { useEffect, useId, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google'
 import { api } from '../api'
 import { useAuth } from '../useAuth'
+import { chooseRole, getSupabase } from '../supabase'
 import Brand from '../Brand'
 import './auth.css'
 
@@ -54,23 +54,68 @@ export default function Login() {
   const [f, setF] = useState(BLANK)
   const [agree, setAgree] = useState(false)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
-  const [clientId, setClientId] = useState(null)
+  const [googleConfigured, setGoogleConfigured] = useState(null)
   const { setUser } = useAuth()
   const nav = useNavigate()
   const reg = mode === 'register'
+  const forgot = mode === 'forgot'
 
   useEffect(() => {
-    api('/api/auth/config').then(d => setClientId(d.googleClientId)).catch(() => setClientId(''))
+    api('/api/auth/config').then(config => setGoogleConfigured(config.googleConfigured)).catch(() => setGoogleConfigured(false))
   }, [])
 
   const set = key => event => setF({ ...f, [key]: event.target.value })
-  const switchMode = nextMode => { setMode(nextMode); setError('') }
-  const done = user => { setUser(user); nav(user.role === 'seller' ? '/seller' : '/buyer') }
+  const switchMode = nextMode => {
+    setMode(nextMode)
+    setError('')
+    setNotice('')
+  }
+  const done = user => {
+    setUser(user)
+    if (user.role === 'admin') window.location.assign('/admin.html')
+    else nav(user.role === 'seller' ? '/seller' : '/buyer')
+  }
+
+  const finishSession = async preferredRole => {
+    const supabase = await getSupabase()
+    let { user } = await api('/api/auth/me')
+    if (!user) throw new Error('Your session could not be loaded. Please try again.')
+    if (!user.role) {
+      await chooseRole(preferredRole)
+      const profile = await api('/api/auth/me')
+      user = profile.user
+    }
+    if (preferredRole && user.role !== preferredRole) {
+      await supabase.auth.signOut()
+      throw new Error(`This account is registered as a ${user.role}. Please choose ${user.role}.`)
+    }
+    done(user)
+  }
 
   async function submit(event) {
     event.preventDefault()
     setError('')
+    setNotice('')
+    if (forgot) {
+      setBusy(true)
+      try {
+        const supabase = await getSupabase()
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(f.email.trim(), {
+          redirectTo: `${window.location.origin}/reset-password`
+        })
+        if (resetError) throw new Error(resetError.message)
+        setNotice('If that email has an account, a password reset link is on its way.')
+      } catch (err) {
+        setError(err.message && err.message !== '{}'
+          ? err.message
+          : 'We could not send a reset link. Please try again.')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
     if (reg) {
       if (!PHONE.test(f.phone.replace(/[\s-]/g, ''))) return setError('Enter a valid mobile number, like 09171234567.')
       if (f.password !== f.confirm) return setError('Passwords do not match.')
@@ -78,11 +123,38 @@ export default function Login() {
     }
     setBusy(true)
     try {
-      const body = reg
-        ? { ...f, confirm: undefined, role }
-        : { email: f.email, password: f.password, role }
-      const { user } = await api(reg ? '/api/auth/register' : '/api/auth/login', { method: 'POST', body })
-      done(user)
+      const supabase = await getSupabase()
+      if (reg) {
+        localStorage.setItem('arilaya:pending-role', role)
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: f.email.trim(),
+          password: f.password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+            data: {
+              first_name: f.firstName.trim(),
+              last_name: f.lastName.trim(),
+              phone: f.phone.trim(),
+              street: f.street.trim(),
+              barangay: f.barangay.trim(),
+              city: f.city.trim(),
+              province: f.province.trim()
+            }
+          }
+        })
+        if (signUpError) throw new Error(signUpError.message)
+        if (!data.session) {
+          setNotice('Check your email to confirm your account, then return here to log in.')
+          return
+        }
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: f.email.trim(),
+          password: f.password
+        })
+        if (signInError) throw new Error(signInError.message)
+      }
+      await finishSession(role)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -90,13 +162,21 @@ export default function Login() {
     }
   }
 
-  async function onGoogle(response) {
+  async function onGoogle() {
     setError('')
+    setNotice('')
+    setBusy(true)
     try {
-      const { user } = await api('/api/auth/google', { method: 'POST', body: { credential: response.credential, role } })
-      done(user)
+      const supabase = await getSupabase()
+      sessionStorage.setItem('arilaya:oauth-role', role)
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback` }
+      })
+      if (oauthError) throw new Error(oauthError.message)
     } catch (err) {
       setError(err.message)
+      setBusy(false)
     }
   }
 
@@ -107,25 +187,27 @@ export default function Login() {
       <section className="au-form" aria-labelledby="auth-title">
         <div className={'au-box' + (reg ? ' wide' : '')}>
           <div key={mode} className="au-swap">
-            <span className="au-eyebrow">{reg ? 'Join AriLaya' : 'Welcome back'}</span>
-            <h1 id="auth-title" className="au-title">{reg ? 'Create your account' : 'Log in to AriLaya'}</h1>
+            <span className="au-eyebrow">{reg ? 'Join AriLaya' : forgot ? 'Account recovery' : 'Welcome back'}</span>
+            <h1 id="auth-title" className="au-title">{reg ? 'Create your account' : forgot ? 'Reset your password' : 'Log in to AriLaya'}</h1>
 
-            <div>
-              <p className="au-lbl">I am a</p>
-              <div className="au-roles" role="group" aria-label="Account type">
-                {['buyer', 'seller'].map(item => (
-                  <button
-                    type="button"
-                    key={item}
-                    className={role === item ? 'on' : ''}
-                    aria-pressed={role === item}
-                    onClick={() => setRole(item)}
-                  >
-                    {item === 'buyer' ? 'Buyer' : 'Seller'}
-                  </button>
-                ))}
+            {!forgot && (
+              <div>
+                <p className="au-lbl">I am a</p>
+                <div className="au-roles" role="group" aria-label="Account type">
+                  {['buyer', 'seller'].map(item => (
+                    <button
+                      type="button"
+                      key={item}
+                      className={role === item ? 'on' : ''}
+                      aria-pressed={role === item}
+                      onClick={() => setRole(item)}
+                    >
+                      {item === 'buyer' ? 'Buyer' : 'Seller'}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <form onSubmit={submit}>
               {reg && (
@@ -161,7 +243,7 @@ export default function Login() {
                   </div>
                   <div className="au-hint">Use at least 8 characters.</div>
                 </>
-              ) : (
+              ) : !forgot && (
                 <Field label="Password" type="password" value={f.password} onChange={set('password')} autoComplete="current-password" />
               )}
 
@@ -172,21 +254,30 @@ export default function Login() {
                 </label>
               )}
               {error && <div className="au-err" role="alert">{error}</div>}
-              <button className="au-btn" disabled={busy}>{busy ? 'Please wait…' : reg ? 'Create account' : 'Log in'}</button>
+              {notice && <div className="au-ok" role="status">{notice}</div>}
+              <button className="au-btn" disabled={busy}>{busy ? 'Please wait…' : reg ? 'Create account' : forgot ? 'Send reset link' : 'Log in'}</button>
             </form>
-          </div>
 
-          <div className="au-or"><span>or continue with</span></div>
-          <div className="au-g">
-            {clientId === null && <span className="au-lbl">Loading Google sign-in…</span>}
-            {clientId === '' && <span className="au-err">Google sign-in isn’t set up yet.</span>}
-            {clientId && (
-              <GoogleOAuthProvider clientId={clientId}>
-                <GoogleLogin onSuccess={onGoogle} onError={() => setError('Google sign-in failed.')}
-                  text={reg ? 'signup_with' : 'signin_with'} width="280" />
-              </GoogleOAuthProvider>
+            {!reg && !forgot && (
+              <button type="button" className="au-linkbtn" onClick={() => switchMode('forgot')}>Forgot password?</button>
+            )}
+            {forgot && (
+              <button type="button" className="au-linkbtn" onClick={() => switchMode('login')}>Back to log in</button>
             )}
           </div>
+
+          {!forgot && (
+            <>
+              <div className="au-or"><span>or continue with</span></div>
+              <div className="au-g">
+                {googleConfigured === null && <span className="au-lbl">Loading Google sign-in…</span>}
+                {googleConfigured === false && <span className="au-hint">Google sign-in isn’t set up yet.</span>}
+                {googleConfigured && (
+                  <button type="button" className="au-google" onClick={onGoogle} disabled={busy}>Continue with Google</button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -195,16 +286,18 @@ export default function Login() {
           <Brand inverted />
           <div key={mode} className="au-side-swap">
             <span className="au-side-eyebrow">Mamburao, Occidental Mindoro</span>
-            <h2>{reg ? 'Your next move starts here.' : 'Good to see you again.'}</h2>
-            <p>{reg ? 'Create one account to discover land, save your favorite lots, or publish a listing.' : 'Pick up where you left off and continue exploring or managing your lots.'}</p>
+            <h2>{reg ? 'Your next move starts here.' : forgot ? 'Let’s get you back in.' : 'Good to see you again.'}</h2>
+            <p>{reg ? 'Create one account to discover land, save your favorite lots, or publish a listing.' : forgot ? 'We’ll email you a secure link to choose a new password.' : 'Pick up where you left off and continue exploring or managing your lots.'}</p>
             <ul className="au-benefits">
               <li>Browse admin-reviewed listings</li>
               <li>View lot boundaries and photos</li>
               <li>Save lots and manage your dashboard</li>
             </ul>
-            <button type="button" className="au-ghost" onClick={() => switchMode(reg ? 'login' : 'register')}>
-              {reg ? 'I already have an account' : 'Create an account'}
-            </button>
+            {!forgot && (
+              <button type="button" className="au-ghost" onClick={() => switchMode(reg ? 'login' : 'register')}>
+                {reg ? 'I already have an account' : 'Create an account'}
+              </button>
+            )}
           </div>
         </div>
       </section>
