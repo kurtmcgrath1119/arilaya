@@ -1,8 +1,9 @@
 export async function api(url, opts) {
+  const isForm = opts?.body instanceof FormData
   const init = opts ? {
     method: opts.method,
-    headers: { 'Content-Type': 'application/json' },
-    body: opts.body ? JSON.stringify(opts.body) : undefined
+    headers: isForm ? undefined : { 'Content-Type': 'application/json' },
+    body: isForm ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined
   } : undefined
   const r = await fetch(url, init)
   const d = await r.json().catch(() => ({}))

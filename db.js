@@ -1,6 +1,9 @@
+const path = require('path');
 const Database = require('better-sqlite3');
-const db = new Database(process.env.DB_PATH || 'arilaya.db');
+const DB_FILE = path.resolve(process.env.DB_PATH || path.join(__dirname, 'arilaya.db'));
+const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS lots (
@@ -46,14 +49,15 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 `);
-try { db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT'); } catch (e) {}
-// extra profile details for registration (safe to run more than once)
-['first_name', 'last_name', 'phone', 'street', 'barangay', 'city', 'province'].forEach(c => {
-  try { db.exec(`ALTER TABLE users ADD COLUMN ${c} TEXT DEFAULT ''`); } catch (e) {}
+const userColumns = new Set(db.pragma('table_info(users)').map(column => column.name));
+if (!userColumns.has('password_hash')) db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT');
+['first_name', 'last_name', 'phone', 'street', 'barangay', 'city', 'province'].forEach(column => {
+  if (!userColumns.has(column)) db.exec(`ALTER TABLE users ADD COLUMN ${column} TEXT DEFAULT ''`);
 });
 
-try { db.exec('ALTER TABLE lots ADD COLUMN owner_id INTEGER'); } catch (e) {}
-try { db.exec("ALTER TABLE lots ADD COLUMN approval TEXT DEFAULT 'approved'"); } catch (e) {}
+const lotColumns = new Set(db.pragma('table_info(lots)').map(column => column.name));
+if (!lotColumns.has('owner_id')) db.exec('ALTER TABLE lots ADD COLUMN owner_id INTEGER');
+if (!lotColumns.has('approval')) db.exec("ALTER TABLE lots ADD COLUMN approval TEXT DEFAULT 'approved'");
 
 
 db.exec(`
@@ -63,6 +67,14 @@ CREATE TABLE IF NOT EXISTS favorites (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, lot_id)
 );
+CREATE TABLE IF NOT EXISTS lot_photos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lot_id INTEGER NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS lot_photos_lot_order ON lot_photos(lot_id, sort_order, id);
 `);
 
 module.exports = db;

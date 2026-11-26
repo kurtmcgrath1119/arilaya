@@ -3,4 +3,7 @@ client/node_modules
 client/dist
 .env
 arilaya.db*
+uploads
+backups
+backup.js
 .git

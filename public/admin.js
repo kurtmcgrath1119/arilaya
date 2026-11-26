@@ -1,103 +1,245 @@
-let map, poly, pts = [], vtx = [], lots = [], editing = null, others;
+let map, poly, pts = [], vtx = [], lots = [], editing = null, others, started = false;
+let reviewFilter = 'pending', reviewQuery = '';
 const FIELDS = ['title', 'barangay', 'land_type', 'price', 'status', 'address', 'nearest_road', 'landmark',
   'seller_name', 'seller_phone', 'description'];
 const COLORS = { available: '#0f6e56', reserved: '#ba7517', sold: '#888780' };
 
-async function boot() {
-  const me = await api('/api/admin/me');
-  me.admin ? start() : $('login').classList.remove('hidden');
+function showMessage(text, ok = true) {
+  $('msg').innerHTML = `<div class="${ok ? 'ok' : 'err'}">${esc(text)}</div>`;
 }
-$('login').addEventListener('submit', async e => {
-  e.preventDefault();
-  try { await api('/api/admin/login', { method: 'POST', body: { username: $('l-user').value, password: $('l-pass').value } }); start(); }
-  catch (err) { $('l-msg').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+
+async function runAction(button, task) {
+  if (button.disabled) return;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Working…';
+  try {
+    await task();
+  } catch (err) {
+    showMessage(err.message, false);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function boot() {
+  try {
+    const me = await api('/api/admin/me');
+    if (me.admin) start();
+    else $('login').classList.remove('hidden');
+  } catch (err) {
+    $('login').classList.remove('hidden');
+    $('l-msg').innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  }
+}
+
+$('login').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Signing in…';
+  $('l-msg').innerHTML = '';
+  try {
+    await api('/api/admin/login', { method: 'POST', body: { username: $('l-user').value, password: $('l-pass').value } });
+    start();
+  } catch (err) {
+    $('l-msg').innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
 });
-$('logout').onclick = async () => { await api('/api/admin/logout', { method: 'POST' }); location.reload(); };
+$('logout').onclick = async () => {
+  $('logout').disabled = true;
+  try { await api('/api/admin/logout', { method: 'POST' }); }
+  finally { location.reload(); }
+};
 
 async function start() {
-  $('login').classList.add('hidden'); $('app').classList.remove('hidden'); $('logout').classList.remove('hidden');
-  fillSelect($('a-barangay'), BARANGAYS); fillSelect($('a-land_type'), LAND_TYPES);
+  if (started) return;
+  started = true;
+  $('login').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  $('logout').classList.remove('hidden');
+  fillSelect($('a-barangay'), BARANGAYS);
+  fillSelect($('a-land_type'), LAND_TYPES);
   fillSelect($('a-status'), ['available', 'reserved', 'sold']);
   map = makeMap('map', 15);
   others = L.layerGroup().addTo(map);
   poly = L.polygon([], { color: '#ffeb3b', weight: 3, fillOpacity: 0.35, interactive: false }).addTo(map);
-  map.on('click', e => { pts.push({ lat: e.latlng.lat, lng: e.latlng.lng }); redraw(); });
+  map.on('click', event => { pts.push({ lat: event.latlng.lat, lng: event.latlng.lng }); redraw(); });
   $('undo').onclick = () => { pts.pop(); redraw(); };
   $('clear').onclick = () => { pts = []; redraw(); };
   $('new').onclick = resetForm;
   $('save').onclick = save;
   $('tbl').onclick = onTable;
-  redraw(); await loadLots(); loadFeedback();
+  $('review-search').oninput = event => { reviewQuery = event.target.value.trim().toLowerCase(); renderLots(); };
+  $('review-filter').onchange = event => { reviewFilter = event.target.value; renderLots(); };
+  $('photo-dialog-close').onclick = () => $('photo-dialog').close();
+  $('photo-dialog').addEventListener('click', event => { if (event.target === $('photo-dialog')) $('photo-dialog').close(); });
+  resetForm();
+  await loadLots();
+  loadFeedback();
 }
 
 function redraw() {
-  vtx.forEach(m => m.remove());
-  vtx = pts.map((p, i) => {
-    const m = L.marker([p.lat, p.lng], { draggable: true, icon: L.divIcon({ className: 'vtx', iconSize: [14, 14] }) }).addTo(map);
-    m.on('drag', e => { const ll = e.target.getLatLng(); pts[i] = { lat: ll.lat, lng: ll.lng }; poly.setLatLngs(toLL(pts)); updArea(); });
-    return m;
+  vtx.forEach(marker => marker.remove());
+  vtx = pts.map((point, index) => {
+    const marker = L.marker([point.lat, point.lng], { draggable: true, icon: L.divIcon({ className: 'vtx', iconSize: [14, 14] }) }).addTo(map);
+    marker.on('drag', event => {
+      const ll = event.target.getLatLng();
+      pts[index] = { lat: ll.lat, lng: ll.lng };
+      poly.setLatLngs(toLL(pts));
+      updArea();
+    });
+    return marker;
   });
-  poly.setLatLngs(toLL(pts)); updArea();
+  poly.setLatLngs(toLL(pts));
+  updArea();
 }
+
 function updArea() {
   $('area').textContent = pts.length >= 3
     ? `${pts.length} points · area ≈ ${Math.round(areaSqm(pts))} m²`
     : `${pts.length} point(s) placed (need at least 3)`;
 }
 
+function visibleLots() {
+  return lots.filter(lot => {
+    const approval = lot.approval || 'approved';
+    const matchesReview = reviewFilter === 'all' || approval === reviewFilter;
+    const haystack = [lot.title, lot.barangay, lot.seller_name, lot.nearest_road, lot.landmark].join(' ').toLowerCase();
+    return matchesReview && (!reviewQuery || haystack.includes(reviewQuery));
+  });
+}
+
+function mapStyle(lot) {
+  const approval = lot.approval || 'approved';
+  if (approval === 'pending') return { color: '#ba7517', fillColor: '#ba7517', fillOpacity: 0.22, weight: 2, dashArray: '6' };
+  if (approval === 'rejected') return { color: '#a32d2d', fillColor: '#a32d2d', fillOpacity: 0.18, weight: 2, dashArray: '3 6' };
+  return { color: COLORS[lot.status], fillColor: COLORS[lot.status], fillOpacity: 0.25, weight: 1.5 };
+}
+
 async function loadLots() {
-  lots = await api('/api/lots');
+  $('review-count').textContent = 'Loading…';
+  try {
+    lots = await api('/api/lots');
+    renderLots();
+  } catch (err) {
+    $('review-count').textContent = 'Unavailable';
+    $('tbl').innerHTML = `<tr><td><div class="err">${esc(err.message)}</div></td></tr>`;
+  }
+}
+
+function renderLots() {
+  const visible = visibleLots();
   others.clearLayers();
-  lots.forEach(l => L.polygon(toLL(l.boundary), { color: COLORS[l.status], fillColor: COLORS[l.status], fillOpacity: 0.25,
-    weight: 1.5, bubblingMouseEvents: false }).on('click', () => edit(l.id)).addTo(others));
-  $('tbl').innerHTML = '<tr><th>Lot</th><th>Review</th><th></th></tr>' + lots.map(l => {
-    const ap = l.approval || 'approved';
-    return `<tr><td>${esc(l.title)}<br><span class="mu">${esc(l.barangay)} · ${peso(l.price)} · ${l.status}</span></td>
-      <td>${ap}</td>
-      <td>${ap !== 'approved' ? `<button data-act="approve" data-id="${l.id}">Approve</button> ` : ''}${ap === 'pending' ? `<button data-act="reject" data-id="${l.id}">Reject</button> ` : ''}<button data-act="edit" data-id="${l.id}">Edit</button> <button class="del" data-act="del" data-id="${l.id}">Delete</button></td></tr>`;
+  visible.forEach(lot => L.polygon(toLL(lot.boundary), { ...mapStyle(lot), bubblingMouseEvents: false })
+    .on('click', () => edit(lot.id)).addTo(others));
+  $('review-count').textContent = `${visible.length} shown`;
+  if (visible.length === 0) {
+    $('tbl').innerHTML = '<tr><td><div class="admin-empty">No listings match this review filter.</div></td></tr>';
+    return;
+  }
+  $('tbl').innerHTML = '<tr><th scope="col">Lot</th><th scope="col">Review</th><th scope="col">Updated</th><th scope="col">Actions</th></tr>' + visible.map(lot => {
+    const approval = lot.approval || 'approved';
+    const photo = lot.photos?.[0]?.url;
+    const photoCount = lot.photos?.length || 0;
+    const updated = String(lot.updated_at || lot.created_at || '').slice(0, 10);
+    return `<tr>
+      <td><div class="admin-lot">${photo ? `<img src="${esc(photo)}" alt="" width="72" height="54" loading="lazy">` : '<span class="admin-no-photo">No photo</span>'}<div><strong>${esc(lot.title)}</strong><br><span class="mu">${esc(lot.barangay)} · ${peso(lot.price)} · ${lot.status}</span></div></div></td>
+      <td><span class="badge ${approval}">${esc(approval)}</span></td>
+      <td><span class="mu">${esc(updated || '-')}</span></td>
+      <td><div class="admin-row-actions">${approval !== 'approved' ? `<button data-act="approve" data-id="${lot.id}">Approve</button>` : ''}${approval === 'pending' ? `<button data-act="reject" data-id="${lot.id}">Reject</button>` : ''}<button data-act="photos" data-id="${lot.id}" ${photoCount ? '' : 'disabled'}>Photos (${photoCount})</button><button data-act="edit" data-id="${lot.id}">Edit</button><button class="del" data-act="del" data-id="${lot.id}">Delete</button></div></td>
+    </tr>`;
   }).join('');
 }
-function onTable(e) {
-  const b = e.target.closest('button[data-act]'); if (!b) return;
-  const id = Number(b.dataset.id), act = b.dataset.act;
-  if (act === 'edit') edit(id);
-  if (act === 'approve' || act === 'reject')
-    api('/api/admin/lots/' + id + '/approval', { method: 'PATCH', body: { approval: act === 'approve' ? 'approved' : 'rejected' } }).then(loadLots);
-  if (act === 'del' && confirm('Delete this lot permanently?'))
-    api('/api/lots/' + id, { method: 'DELETE' }).then(() => { if (editing === id) resetForm(); loadLots(); });
+
+function onTable(event) {
+  const button = event.target.closest('button[data-act]');
+  if (!button || button.disabled) return;
+  const id = Number(button.dataset.id);
+  const action = button.dataset.act;
+  if (action === 'edit') edit(id);
+  if (action === 'photos') openPhotos(id);
+  if (action === 'approve' || action === 'reject') {
+    runAction(button, async () => {
+      await api('/api/admin/lots/' + id + '/approval', { method: 'PATCH', body: { approval: action === 'approve' ? 'approved' : 'rejected' } });
+      await loadLots();
+    });
+  }
+  if (action === 'del' && confirm('Delete this lot permanently?')) {
+    runAction(button, async () => {
+      await api('/api/lots/' + id, { method: 'DELETE' });
+      if (editing === id) resetForm();
+      await loadLots();
+    });
+  }
 }
+
+function openPhotos(id) {
+  const lot = lots.find(item => item.id === id);
+  if (!lot?.photos?.length) return;
+  $('photo-dialog-title').textContent = lot.title;
+  $('photo-dialog-grid').innerHTML = lot.photos.map((photo, index) => `<a href="${esc(photo.url)}" target="_blank" rel="noopener"><img src="${esc(photo.url)}" alt="${esc(lot.title)}, photo ${index + 1}" loading="lazy"></a>`).join('');
+  $('photo-dialog').showModal();
+}
+
 function edit(id) {
-  const l = lots.find(x => x.id === id); if (!l) return;
-  editing = id; $('form-title').textContent = 'Edit lot #' + id;
-  FIELDS.forEach(f => $('a-' + f).value = l[f] ?? '');
-  pts = l.boundary.map(p => ({ lat: p.lat, lng: p.lng })); redraw();
+  const lot = lots.find(item => item.id === id);
+  if (!lot) return;
+  editing = id;
+  $('form-title').textContent = 'Edit lot #' + id;
+  FIELDS.forEach(field => { $('a-' + field).value = lot[field] ?? ''; });
+  pts = lot.boundary.map(point => ({ lat: point.lat, lng: point.lng }));
+  redraw();
   map.fitBounds(poly.getBounds(), { maxZoom: 19, padding: [40, 40] });
   $('msg').innerHTML = '';
+  document.querySelector('.admin-form-section')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
 }
+
 function resetForm() {
-  editing = null; $('form-title').textContent = 'Add a lot';
-  FIELDS.forEach(f => $('a-' + f).value = f === 'barangay' ? BARANGAYS[0] : f === 'land_type' ? 'residential' : f === 'status' ? 'available' : '');
-  pts = []; redraw(); $('msg').innerHTML = '';
+  editing = null;
+  $('form-title').textContent = 'Add a lot';
+  FIELDS.forEach(field => { $('a-' + field).value = field === 'barangay' ? BARANGAYS[0] : field === 'land_type' ? 'residential' : field === 'status' ? 'available' : ''; });
+  pts = [];
+  redraw();
+  $('msg').innerHTML = '';
 }
-async function save() {
-  const body = { boundary: pts };
-  FIELDS.forEach(f => body[f] = $('a-' + f).value);
-  if (pts.length >= 3) {
-    body.area_sqm = Math.round(areaSqm(pts) * 10) / 10;
-    body.center_lat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
-    body.center_lng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
+
+function save() {
+  if (pts.length < 3) {
+    showMessage('Place at least 3 boundary points before saving.', false);
+    return;
   }
-  try {
-    editing ? await api('/api/lots/' + editing, { method: 'PUT', body }) : await api('/api/lots', { method: 'POST', body });
-    $('msg').innerHTML = '<div class="ok">Saved.</div>'; resetForm(); loadLots();
-  } catch (err) { $('msg').innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+  const body = { boundary: pts };
+  FIELDS.forEach(field => { body[field] = $('a-' + field).value; });
+  body.area_sqm = Math.round(areaSqm(pts) * 10) / 10;
+  body.center_lat = pts.reduce((sum, point) => sum + point.lat, 0) / pts.length;
+  body.center_lng = pts.reduce((sum, point) => sum + point.lng, 0) / pts.length;
+  runAction($('save'), async () => {
+    if (editing) await api('/api/lots/' + editing, { method: 'PUT', body });
+    else await api('/api/lots', { method: 'POST', body });
+    showMessage('Saved.');
+    resetForm();
+    await loadLots();
+  });
 }
+
 async function loadFeedback() {
-  const { avg, recent } = await api('/api/admin/feedback');
-  const f = n => avg[n] ? Number(avg[n]).toFixed(2) : '-';
-  $('fbsum').innerHTML = `Responses: <b>${avg.count}</b><table>
-    <tr><td>Functionality</td><td>${f('functionality')} / 5</td></tr><tr><td>Usability</td><td>${f('usability')} / 5</td></tr>
-    <tr><td>Reliability</td><td>${f('reliability')} / 5</td></tr><tr><td>Satisfaction</td><td>${f('satisfaction')} / 5</td></tr></table>` +
-    recent.map(r => `<p>“${esc(r.comment)}” <span class="mu">– ${esc(r.role)}</span></p>`).join('');
+  $('fbsum').innerHTML = 'Loading…';
+  try {
+    const { avg, recent } = await api('/api/admin/feedback');
+    const format = key => avg[key] ? Number(avg[key]).toFixed(2) : '-';
+    $('fbsum').innerHTML = `<div class="admin-feedback-summary">Responses: <b>${Number(avg.count || 0)}</b><table>
+      <tr><td>Functionality</td><td>${format('functionality')} / 5</td></tr><tr><td>Usability</td><td>${format('usability')} / 5</td></tr>
+      <tr><td>Reliability</td><td>${format('reliability')} / 5</td></tr><tr><td>Satisfaction</td><td>${format('satisfaction')} / 5</td></tr></table></div>` +
+      (recent.length ? recent.map(item => `<article class="admin-feedback-item"><p>“${esc(item.comment)}”</p><span>${esc(item.role)} · ${esc(String(item.created_at || '').slice(0, 10) || 'Date unavailable')}</span></article>`).join('') : '<p class="admin-empty">No feedback yet.</p>');
+  } catch (err) {
+    $('fbsum').innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  }
 }
+
 boot();

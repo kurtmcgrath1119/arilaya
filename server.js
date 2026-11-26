@@ -2,25 +2,39 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
+const sharp = require('sharp');
 const db = require('./db');
+
+const DB_FILE = path.resolve(process.env.DB_PATH || path.join(__dirname, 'arilaya.db'));
+const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(path.dirname(DB_FILE), 'uploads');
+const MAX_PHOTOS = 6;
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.set('trust proxy', 1);
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-only-secret',
+  secret: process.env.SESSION_SECRET || (process.env.NODE_ENV === 'production' ? crypto.randomBytes(32).toString('hex') : 'dev-only-secret'),
   resave: false, saveUninitialized: false,
    cookie: { httpOnly: true, sameSite: 'lax', secure: 'auto' }
 }));
 const DIST = path.join(__dirname, 'client', 'dist');
+app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d', immutable: true, index: false }));
 app.use(express.static(DIST));                             
 app.use(express.static(path.join(__dirname, 'public')));   
 
 const hash = s => crypto.createHash('sha256').update(String(s)).digest();
 const same = (a, b) => crypto.timingSafeEqual(hash(a), hash(b));
 const admin = (req, res, next) => req.session.admin ? next() : res.status(401).json({ error: 'Login required' });
-const parse = r => ({ ...r, boundary: JSON.parse(r.boundary) });
+const parse = r => ({
+  ...r,
+  boundary: JSON.parse(r.boundary),
+  photos: db.prepare('SELECT id, filename FROM lot_photos WHERE lot_id=? ORDER BY sort_order, id').all(r.id)
+    .map(p => ({ id: p.id, url: '/uploads/' + p.filename }))
+});
 
 const STATUS = ['available', 'reserved', 'sold'];
 const TYPES = ['residential', 'agricultural', 'commercial', 'industrial'];
@@ -40,7 +54,11 @@ function clean(b) {
   if (!o.title || !o.barangay) return { error: 'Title and barangay are required.' };
   if (!(o.price >= 0) || !(o.area_sqm > 0)) return { error: 'Price and area must be valid numbers.' };
   if (!TYPES.includes(o.land_type) || !STATUS.includes(o.status)) return { error: 'Invalid land type or status.' };
-  const bd = Array.isArray(b.boundary) ? b.boundary : [];
+  let boundary = b.boundary;
+  if (typeof boundary === 'string') {
+    try { boundary = JSON.parse(boundary); } catch { boundary = []; }
+  }
+  const bd = Array.isArray(boundary) ? boundary : [];
   if (bd.length < 3 || bd.some(p => !Number.isFinite(p.lat) || !Number.isFinite(p.lng)))
     return { error: 'Mark at least 3 boundary points on the map.' };
   if (!Number.isFinite(o.center_lat) || !Number.isFinite(o.center_lng)) return { error: 'Invalid map location.' };
@@ -48,7 +66,71 @@ function clean(b) {
   return { o };
 }
 
-// ---------- Public API ----------
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: MAX_PHOTOS },
+  fileFilter: (req, file, cb) => {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype))
+      return cb(new Error('Only JPG, PNG, and WebP photos are allowed.'));
+    cb(null, true);
+  }
+});
+
+function uploadPhotos(req, res, next) {
+  upload.array('photos', MAX_PHOTOS)(req, res, err => {
+    if (!err) return next();
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'Each photo must be 8 MB or smaller.'
+      : ['LIMIT_FILE_COUNT', 'LIMIT_UNEXPECTED_FILE'].includes(err.code) ? 'You can upload up to 6 photos.'
+        : err.message || 'Photo upload failed.';
+    res.status(400).json({ error: message });
+  });
+}
+
+const photoRows = lotId => db.prepare('SELECT id, filename FROM lot_photos WHERE lot_id=? ORDER BY sort_order, id').all(lotId);
+
+function removePhotoFiles(filenames) {
+  for (const filename of filenames) {
+    if (path.basename(filename) !== filename) continue;
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, filename)); } catch (e) { if (e.code !== 'ENOENT') console.error(e.message); }
+  }
+}
+
+async function processPhotoFiles(files = []) {
+  const filenames = [];
+  try {
+    for (const file of files) {
+      const filename = crypto.randomUUID() + '.webp';
+      await sharp(file.buffer).rotate()
+        .resize({ width: 1600, height: 1200, fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 82 })
+        .toFile(path.join(UPLOAD_DIR, filename));
+      filenames.push(filename);
+    }
+    return filenames;
+  } catch (e) {
+    removePhotoFiles(filenames);
+    throw e;
+  }
+}
+
+function insertPhotoRows(lotId, filenames, startOrder = 0) {
+  const insert = db.prepare('INSERT INTO lot_photos (lot_id, filename, sort_order) VALUES (?, ?, ?)');
+  filenames.forEach((filename, i) => insert.run(lotId, filename, startOrder + i));
+}
+
+function parseRemovedPhotos(value) {
+  const values = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  return [...new Set(values.map(Number).filter(Number.isInteger))];
+}
+
+function deleteLot(id) {
+  const filenames = photoRows(id).map(p => p.filename);
+  const result = db.prepare('DELETE FROM lots WHERE id=?').run(id);
+  if (result.changes) removePhotoFiles(filenames);
+  return result.changes > 0;
+}
+
+// !!!! PUBLIC API !!!!
 app.get('/api/lots', (req, res) => {
   const rows = req.session.admin
     ? db.prepare('SELECT * FROM lots ORDER BY id DESC').all()
@@ -57,6 +139,15 @@ app.get('/api/lots', (req, res) => {
 });
 app.get('/api/landmarks', (req, res) =>
   res.json(db.prepare('SELECT * FROM landmarks ORDER BY name').all()));
+app.get('/api/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    googleConfigured: Boolean(process.env.GOOGLE_CLIENT_ID),
+    customStorageConfigured: Boolean(process.env.DB_PATH && process.env.UPLOAD_DIR),
+    approvedLots: db.prepare("SELECT COUNT(*) count FROM lots WHERE approval='approved'").get().count
+  });
+});
 
 app.post('/api/feedback', (req, res) => {
   const b = req.body || {};
@@ -70,7 +161,8 @@ app.post('/api/feedback', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Admin API ----------
+// !!! ADMIN API !!!
+
 app.post('/api/admin/login', (req, res) => {
   const { username, password } = req.body || {};
   const u = process.env.ADMIN_USERNAME, p = process.env.ADMIN_PASSWORD;
@@ -94,7 +186,7 @@ app.put('/api/lots/:id', admin, (req, res) => {
   r.changes ? res.json({ ok: true }) : res.status(404).json({ error: 'Lot not found.' });
 });
 app.delete('/api/lots/:id', admin, (req, res) => {
-  db.prepare('DELETE FROM lots WHERE id=?').run(Number(req.params.id));
+  deleteLot(Number(req.params.id));
   res.json({ ok: true });
 });
 app.get('/api/admin/feedback', admin, (req, res) => {
@@ -109,8 +201,10 @@ app.get('/api/admin/feedback', admin, (req, res) => {
 const { OAuth2Client } = require('google-auth-library');
 const gClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-app.get('/api/auth/config', (req, res) =>
-  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || '' }));
+app.get('/api/auth/config', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || '' });
+});
 
 app.post('/api/auth/google', async (req, res) => {
   try {
@@ -132,6 +226,7 @@ app.post('/api/auth/google', async (req, res) => {
     req.session.user = { id: u.id, name: u.name, email: u.email, picture: u.picture, role: u.role };
     res.json({ user: req.session.user });
   } catch (e) {
+    console.error('Google sign-in failed:', e.message);
     res.status(401).json({ error: 'Google sign-in failed. Please try again.' });
   }
 });
@@ -140,7 +235,7 @@ app.get('/api/auth/me', (req, res) => res.json({ user: req.session.user || null 
 app.post('/api/auth/logout', (req, res) => { delete req.session.user; res.json({ ok: true }); });
 
 
-// ---------- Email + password accounts ----------
+// !!! email/password login and registration (local accounts) !!!
 const scryptHash = (pw, salt) => crypto.scryptSync(String(pw), salt, 64).toString('hex');
 const sessionUser = (id, name, email, picture, role) => ({ id, name, email, picture: picture || '', role });
 
@@ -189,6 +284,7 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 
+//!! Seller API !!
 
 const seller = (req, res, next) =>
   req.session.user && req.session.user.role === 'seller' ? next() : res.status(401).json({ error: 'Seller login required' });
@@ -208,26 +304,87 @@ app.patch('/api/seller/profile', seller, (req, res) => {
 app.get('/api/seller/lots', seller, (req, res) =>
   res.json(db.prepare('SELECT * FROM lots WHERE owner_id=? ORDER BY id DESC').all(req.session.user.id).map(parse)));
 
-app.post('/api/seller/lots', seller, (req, res) => {
+app.post('/api/seller/lots', seller, uploadPhotos, async (req, res) => {
   const { o, error } = clean(req.body || {});
   if (error) return res.status(400).json({ error });
-  const me = db.prepare('SELECT name,phone FROM users WHERE id=?').get(req.session.user.id);
-  o.seller_name = me.name; o.seller_phone = me.phone || '';
-  o.owner_id = req.session.user.id; o.approval = 'pending';
-  const cols = [...FIELDS, 'owner_id', 'approval'];
-  const r = db.prepare(`INSERT INTO lots (${cols.join(',')}) VALUES (${cols.map(c => '@' + c).join(',')})`).run(o);
-  res.json({ id: r.lastInsertRowid });
+  const files = req.files || [];
+  if (files.length > MAX_PHOTOS) return res.status(400).json({ error: 'You can upload up to 6 photos.' });
+
+  let filenames;
+  try {
+    filenames = await processPhotoFiles(files);
+  } catch (e) {
+    console.error('Photo processing failed:', e.message);
+    return res.status(400).json({ error: 'Photos could not be processed. Use valid JPG, PNG, or WebP images.' });
+  }
+
+  try {
+    const id = db.transaction(() => {
+      const me = db.prepare('SELECT name,phone FROM users WHERE id=?').get(req.session.user.id);
+      o.seller_name = me.name; o.seller_phone = me.phone || '';
+      o.owner_id = req.session.user.id; o.approval = 'pending';
+      const cols = [...FIELDS, 'owner_id', 'approval'];
+      const r = db.prepare(`INSERT INTO lots (${cols.join(',')}) VALUES (${cols.map(c => '@' + c).join(',')})`).run(o);
+      insertPhotoRows(r.lastInsertRowid, filenames);
+      return r.lastInsertRowid;
+    })();
+    res.json({ id });
+  } catch (e) {
+    removePhotoFiles(filenames);
+    console.error('Listing creation failed:', e.message);
+    res.status(500).json({ error: 'Could not save the listing. Please try again.' });
+  }
 });
 
-app.put('/api/seller/lots/:id', seller, (req, res) => {
+app.put('/api/seller/lots/:id', seller, uploadPhotos, async (req, res) => {
+  const id = Number(req.params.id);
+  const owned = db.prepare('SELECT id FROM lots WHERE id=? AND owner_id=?').get(id, req.session.user.id);
+  if (!owned) return res.status(404).json({ error: 'Lot not found.' });
   const { o, error } = clean(req.body || {});
   if (error) return res.status(400).json({ error });
-  const me = db.prepare('SELECT name,phone FROM users WHERE id=?').get(req.session.user.id);
-  o.seller_name = me.name; o.seller_phone = me.phone || '';
-  const r = db.prepare(`UPDATE lots SET ${FIELDS.map(f => f + '=@' + f).join(',')}, approval='pending',
-    updated_at=CURRENT_TIMESTAMP WHERE id=@id AND owner_id=@owner`)
-    .run({ ...o, id: Number(req.params.id), owner: req.session.user.id });
-  r.changes ? res.json({ ok: true }) : res.status(404).json({ error: 'Lot not found.' });
+
+  const existing = photoRows(id);
+  const removedIds = parseRemovedPhotos(req.body?.removePhotos);
+  const removed = existing.filter(p => removedIds.includes(p.id));
+  const kept = existing.filter(p => !removedIds.includes(p.id));
+  const files = req.files || [];
+  if (kept.length + files.length > MAX_PHOTOS)
+    return res.status(400).json({ error: 'A listing can have up to 6 photos.' });
+
+  let filenames;
+  try {
+    filenames = await processPhotoFiles(files);
+  } catch (e) {
+    console.error('Photo processing failed:', e.message);
+    return res.status(400).json({ error: 'Photos could not be processed. Use valid JPG, PNG, or WebP images.' });
+  }
+
+  try {
+    const updated = db.transaction(() => {
+      const me = db.prepare('SELECT name,phone FROM users WHERE id=?').get(req.session.user.id);
+      o.seller_name = me.name; o.seller_phone = me.phone || '';
+      const r = db.prepare(`UPDATE lots SET ${FIELDS.map(f => f + '=@' + f).join(',')}, approval='pending',
+        updated_at=CURRENT_TIMESTAMP WHERE id=@id AND owner_id=@owner`)
+        .run({ ...o, id, owner: req.session.user.id });
+      if (!r.changes) return false;
+      const remove = db.prepare('DELETE FROM lot_photos WHERE id=? AND lot_id=?');
+      removed.forEach(p => remove.run(p.id, id));
+      const reorder = db.prepare('UPDATE lot_photos SET sort_order=? WHERE id=? AND lot_id=?');
+      kept.forEach((p, i) => reorder.run(i, p.id, id));
+      insertPhotoRows(id, filenames, kept.length);
+      return true;
+    })();
+    if (!updated) {
+      removePhotoFiles(filenames);
+      return res.status(404).json({ error: 'Lot not found.' });
+    }
+    removePhotoFiles(removed.map(p => p.filename));
+    res.json({ ok: true });
+  } catch (e) {
+    removePhotoFiles(filenames);
+    console.error('Listing update failed:', e.message);
+    res.status(500).json({ error: 'Could not update the listing. Please try again.' });
+  }
 });
 
 app.patch('/api/seller/lots/:id/status', seller, (req, res) => {
@@ -239,7 +396,10 @@ app.patch('/api/seller/lots/:id/status', seller, (req, res) => {
 });
 
 app.delete('/api/seller/lots/:id', seller, (req, res) => {
-  db.prepare('DELETE FROM lots WHERE id=? AND owner_id=?').run(Number(req.params.id), req.session.user.id);
+  const id = Number(req.params.id);
+  const owned = db.prepare('SELECT id FROM lots WHERE id=? AND owner_id=?').get(id, req.session.user.id);
+  if (!owned) return res.status(404).json({ error: 'Lot not found.' });
+  deleteLot(id);
   res.json({ ok: true });
 });
 
@@ -252,7 +412,7 @@ app.patch('/api/admin/lots/:id/approval', admin, (req, res) => {
 });
 
 
-
+//!! Buyer API !!
 
 
 const buyer = (req, res, next) =>
@@ -292,10 +452,17 @@ app.delete('/api/buyer/favorites/:id', buyer, (req, res) => {
 
 
 app.use((req, res, next) => {
-  if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
+  if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
   res.sendFile(path.join(DIST, 'index.html'), err => err && next());
 });
 
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`AriLaya running at http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  const users = db.prepare('SELECT COUNT(*) count FROM users').get().count;
+  const lots = db.prepare('SELECT COUNT(*) count FROM lots').get().count;
+  console.log(`AriLaya running at http://localhost:${PORT}`);
+  console.log(`Database: ${DB_FILE}`);
+  console.log(`Uploads: ${UPLOAD_DIR}`);
+  console.log(`Stored records: ${users} users, ${lots} lots`);
+});

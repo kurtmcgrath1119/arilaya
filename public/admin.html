@@ -1,52 +1,92 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AriLaya Admin</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<link rel="stylesheet" href="style.css">
-</head><body>
-<header><h1>AriLaya Admin</h1><span><a href="index.html">View site</a> <button id="logout" class="hidden">Log out</button></span></header>
-
-<form id="login" class="login">
-  <h3 style="margin-top:0">Admin login</h3>
-  <label>Username</label><input id="l-user" autocomplete="username" required>
-  <label>Password</label><input id="l-pass" type="password" autocomplete="current-password" required>
-  <div class="row"><button class="pri">Log in</button></div><div id="l-msg"></div>
-</form>
-
-<div id="app" class="layout hidden">
-  <aside class="side">
-    <h3 style="margin-top:0" id="form-title">Add a lot</h3>
-    <p class="mu">Click the map to mark each corner of the lot. Drag the yellow dots to adjust.</p>
-    <div class="row"><button type="button" id="undo">Undo point</button><button type="button" id="clear">Clear boundary</button></div>
-    <p id="area" class="mu"></p>
-    <label>Title</label><input id="a-title">
-    <div class="two">
-      <div><label>Barangay</label><select id="a-barangay"></select></div>
-      <div><label>Land type</label><select id="a-land_type"></select></div>
-      <div><label>Price (₱)</label><input id="a-price" type="number" min="0"></div>
-      <div><label>Status</label><select id="a-status"></select></div>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1b3a2f">
+  <meta name="description" content="AriLaya administration for reviewing and managing mapped lot listings.">
+  <title>AriLaya Admin</title>
+  <link rel="icon" type="image/jpeg" href="/logo.jpg">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <a class="skip-link" href="#admin-main">Skip to administration</a>
+  <header class="admin-header">
+    <a class="admin-brand" href="/" aria-label="AriLaya home">
+      <img src="/logo.jpg" alt="" width="42" height="42">
+      <span>AriLaya <small>Administration</small></span>
+    </a>
+    <div class="admin-header-actions">
+      <a href="/">View site</a>
+      <button id="logout" class="hidden" type="button">Log out</button>
     </div>
-    <label>Address / street</label><input id="a-address">
-    <div class="two">
-      <div><label>Nearest road</label><input id="a-nearest_road"></div>
-      <div><label>Nearest landmark</label><input id="a-landmark"></div>
-      <div><label>Seller name</label><input id="a-seller_name"></div>
-      <div><label>Seller phone</label><input id="a-seller_phone"></div>
+  </header>
+  <h1 class="visually-hidden">AriLaya administration</h1>
+
+  <main id="admin-main" tabindex="-1">
+    <form id="login" class="login hidden">
+      <span class="admin-eyebrow">Restricted access</span>
+      <h2>Admin login</h2>
+      <p class="mu">Sign in to review listings and manage the public map.</p>
+      <label for="l-user">Username</label><input id="l-user" autocomplete="username" required>
+      <label for="l-pass">Password</label><input id="l-pass" type="password" autocomplete="current-password" required>
+      <div class="row"><button class="pri" type="submit">Log in</button></div><div id="l-msg" aria-live="polite"></div>
+    </form>
+
+    <div id="app" class="layout hidden">
+      <div id="map" aria-label="Lot boundary map"></div>
+      <aside class="side">
+        <section class="admin-form-section" aria-labelledby="form-title">
+          <h2 id="form-title">Add a lot</h2>
+          <p class="mu">Click the map to mark each corner of the lot. Drag the yellow dots to adjust.</p>
+          <div class="row"><button type="button" id="undo">Undo point</button><button type="button" id="clear">Clear boundary</button></div>
+          <p id="area" class="mu" aria-live="polite"></p>
+          <label for="a-title">Title</label><input id="a-title">
+          <div class="two">
+            <div><label for="a-barangay">Barangay</label><select id="a-barangay"></select></div>
+            <div><label for="a-land_type">Land type</label><select id="a-land_type"></select></div>
+            <div><label for="a-price">Price (₱)</label><input id="a-price" type="number" min="0"></div>
+            <div><label for="a-status">Status</label><select id="a-status"></select></div>
+          </div>
+          <label for="a-address">Address / street</label><input id="a-address">
+          <div class="two">
+            <div><label for="a-nearest_road">Nearest road</label><input id="a-nearest_road"></div>
+            <div><label for="a-landmark">Nearest landmark</label><input id="a-landmark"></div>
+            <div><label for="a-seller_name">Seller name</label><input id="a-seller_name"></div>
+            <div><label for="a-seller_phone">Seller phone</label><input id="a-seller_phone" inputmode="tel"></div>
+          </div>
+          <label for="a-description">Description</label><textarea id="a-description" rows="3"></textarea>
+          <div class="row"><button type="button" id="save" class="pri">Save lot</button><button type="button" id="new">New / cancel edit</button></div>
+          <div id="msg" aria-live="polite"></div>
+        </section>
+
+        <section class="admin-review-section" aria-labelledby="review-title">
+          <div class="admin-section-head"><h2 id="review-title">Listing review</h2><span id="review-count" class="mu"></span></div>
+          <div class="admin-review-tools">
+            <div><label for="review-search">Search lots</label><input id="review-search" type="search" placeholder="Title, barangay, or seller"></div>
+            <div><label for="review-filter">Review status</label><select id="review-filter"><option value="pending">Pending review</option><option value="all">All listings</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></div>
+          </div>
+          <div class="admin-table-scroll"><table id="tbl"></table></div>
+        </section>
+
+        <section class="admin-feedback-section" aria-labelledby="feedback-title">
+          <h2 id="feedback-title">Evaluation feedback</h2>
+          <div id="fbsum" class="mu" aria-live="polite">Loading…</div>
+        </section>
+      </aside>
     </div>
-    <label>Description</label><textarea id="a-description" rows="3"></textarea>
-    <div class="row"><button type="button" id="save" class="pri">Save lot</button><button type="button" id="new">New / cancel edit</button></div>
-    <div id="msg"></div>
+  </main>
 
-    <h3>All lots</h3>
-    <table id="tbl"></table>
+  <dialog id="photo-dialog" class="admin-photo-dialog" aria-labelledby="photo-dialog-title">
+    <div class="admin-photo-shell">
+      <header><div><span class="admin-eyebrow">Listing photos</span><h2 id="photo-dialog-title">Lot photos</h2></div><button type="button" id="photo-dialog-close" aria-label="Close photo gallery">×</button></header>
+      <div id="photo-dialog-grid" class="admin-photo-grid"></div>
+    </div>
+  </dialog>
 
-    <h3>Evaluation feedback</h3>
-    <div id="fbsum" class="mu">Loading…</div>
-  </aside>
-  <div id="map"></div>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="common.js"></script>
-<script src="admin.js"></script>
-</body></html>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="common.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>
