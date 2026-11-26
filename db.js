@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 `);
+try { db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT'); } catch (e) {}
 // extra profile details for registration (safe to run more than once)
 ['first_name', 'last_name', 'phone', 'street', 'barangay', 'city', 'province'].forEach(c => {
   try { db.exec(`ALTER TABLE users ADD COLUMN ${c} TEXT DEFAULT ''`); } catch (e) {}
